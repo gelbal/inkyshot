@@ -26,11 +26,13 @@ COPY start.sh .
 COPY run-update.sh .
 COPY lib lib
 COPY fonts fonts
+COPY quotes quotes
 COPY weather-icons weather-icons
 
 RUN chmod +x start.sh
 RUN chmod +x run-update.sh
 
+COPY display_utils.py .
 COPY update-display.py .
 
 CMD ["/bin/bash","start.sh"]

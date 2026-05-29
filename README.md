@@ -1,12 +1,12 @@
 # Inkyshot - a shot of inspiration to start the day
 
-![](https://raw.githubusercontent.com/balena-labs-projects/inkyshot/master/assets/header-photo.jpg)
+![](assets/header-photo.jpg)
 
 **Get a daily random inspirational quote delivered direct to your desk with Inkyshot. Build multiple Inkyshots and share the inspiration with your friends, family and loved ones ❤️**
 
 ## Hardware required
 
-![](https://raw.githubusercontent.com/balena-labs-projects/inkyshot/master/assets/hardware-photo.jpg)
+![](assets/hardware-photo.jpg)
 
 - Raspberry Pi (tested with Zero and 3B so far)
 - [Pimoroni InkyPHAT display](https://shop.pimoroni.com/products/inky-phat?variant=12549254938707)
@@ -19,9 +19,11 @@
 
 Running this project is as simple as deploying it to a balenaCloud application. You can do it in just one click by using the button below:
 
-[![](https://balena.io/deploy.png)](https://dashboard.balena-cloud.com/deploy?repoUrl=https://github.com/balena-labs-projects/inkyshot)
+[![](https://balena.io/deploy.png)](https://dashboard.balena-cloud.com/deploy?repoUrl=https://github.com/gelbal/inkyshot)
 
 You can also deploy in the traditional manner using the balena CLI and `balena push` command. For more information [check out the docs](https://www.balena.io/docs/learn/deploy/deployment/).
+
+The quote of the day service now requires an API token. Create one through [They Said So](https://theysaidso.com/api) and set it as `QOD_API_TOKEN`.
 
 ## Customization
 
@@ -41,9 +43,17 @@ This timezone is also used for displaying the correct date when the environment 
 
 Is there a special occasion in your family? Override the daily quote with a shot of celebration by setting the `INKY_MESSAGE` environment variable. Try `Happy birthday Sister!`, `Congratulations on the new job, mate!`, or `Happy mother's day!`.
 
+### Custom CSV quotes
+
+Set `CSV_MESSAGE` to cycle through your own quotes instead of calling the quote API. By default quotes are separated with `;`, for example `First quote;Second quote;Third quote`.
+
+Set `CSV_DELIMITER` to change the separator. Use `\n` for one quote per line.
+
+Set `CSV_LOCAL_NAME` to load quotes from a file under `inkyshot/quotes/` in the application image. The app tracks the next quote with a `csv_index` device tag when balena API credentials are available.
+
 ### Quote of the day category
 
-The quote api has several quote categories available. Use the `QOD_CATEGORY` environment variable to change the type of quote retreived. Available categories: `inspire` (default), `management`, `sports`, `life`, `funny`, `love`, `art`, `students`.
+The quote API has several quote categories available. Use the `QOD_CATEGORY` environment variable to change the type of quote retrieved. Available categories: `inspire` (default), `management`, `sports`, `life`, `funny`, `love`, `art`, `students`.
 
 ### Font
 
@@ -67,11 +77,15 @@ To enable the weather display, set the environment variable `MODE` to `weather`.
 
 Next, use either `LATLONG` (e.g. 39.9199,32.8543) or `WEATHER_LOCATION` (e.g. Ankara, Turkey) environment variables to define the location for weather information. Entering only an empty `WEATHER_LOCATION` is also sufficient and in this case Inkyshot will lookup the latitude and longitude information from device's IP address.
 
-Set `SCALE` environment variable to `F` to display the temperature values in Fahrenheit scale. The default is Celcius scale.
+Set `SCALE` environment variable to `F` to display the temperature values in Fahrenheit scale. The default is Celsius scale.
+
+Set `TEMP_THRESHOLD` to a temperature above which the current temperature is shown in colour on colour eInk displays. The default is `25` Celsius or `77` Fahrenheit, depending on `SCALE`.
 
 Use the `WEATHER_FONT` variable to customize the font used in weather display mode.
 
 Use the `WEATHER_INVERT` variable to invert the Image being displayed - `WAVESHARE` specific.
+
+Use `WEATHER_DARK_MODE` to swap black and white pixels for weather mode.
 
 `LOCALE` variable allows to display the date of temperature reading in any language supported by [the date library](https://arrow.readthedocs.io/en/latest/#module-arrow.locales).
 
@@ -83,6 +97,17 @@ By default, the first display is quote mode and you can instead chose weather by
 
 By default the device will be assigned the hostname `inkyshot` so it can be easily found on a network. This can be changed with the `SET_HOSTNAME` environment variable.
 
+## Local smoke testing
+
+You can render a preview image without display hardware by setting `DRY_RUN=1`. This is useful for quote layout changes before deploying to a device.
+
+```sh
+PYTHONPATH=inkyshot DRY_RUN=1 INKY_MESSAGE="Fork smoke test" \
+  DRY_RUN_OUTPUT=/tmp/inkyshot-preview.png python inkyshot/update-display.py
+```
+
+Set `DRY_RUN_WIDTH` and `DRY_RUN_HEIGHT` to preview a different display size.
+
 ## Wifi Connect
 
 As from v1.2.0 this project includes [wifi-connect](https://github.com/balena-io/wifi-connect) which is a utility for dynamically setting the WiFi configuration on a Linux device via a captive portal. If your device is not connected to the internet, an access point will be created. You can refer to the docs [here](https://github.com/balenablocks/wifi-connect#customisation) for customizing the different settings for wifi-connect.
@@ -91,29 +116,17 @@ As from v1.2.0 this project includes [wifi-connect](https://github.com/balena-io
 
 STL files are included within the assets folder of the project for you to 3D print your own case.
 
-![](https://raw.githubusercontent.com/balena-labs-projects/inkyshot/master/assets/inky-print.png)
+![](assets/inky-print.png)
 
 The case has two positions for a captive M3 nut, and can be fastened together with two countersunk 8mm M3 machine screws. If you're using design 2, the screws you'll need are something [like this](https://www.accu.co.uk/en/self-tapping-raised-torx-screws/21738-SHRKT-No-2-1-2-A2).
 
 A position is open in the rear of the case for the use of a [micro USB PCB socket](https://www.aliexpress.com/item/4000484202812.html), allowing for direct connection of power to the back of a Raspberry Pi Zero.
 
-![](https://raw.githubusercontent.com/balena-labs-projects/inkyshot/master/assets/inky-rear.png)
+![](assets/inky-rear.png)
 
-## Contributing & Commit structure
+## Contributing
 
-_When submitting a pull request, please use the guidance outlined below._
-
-Each commit message should consist of a _body_ and a _footer_, structured in the following format:
-
-```
-<scope (optional)>: <subject (mandatory)>
---BLANK LINK--
-(optional) <body>
---BLANK LINE--
-(optional) Connects-to: #issue-number
-(mandatory) Change-type: major | minor | patch
-(optional) Signed-off-by: Foo Bar <foobar@balena.io>
-```
+This fork is open source and maintained outside the original balena experimental project. Pull requests are welcome, especially for hardware support, local testing, and quote/weather source improvements. Please include a short note about what hardware or dry-run path you tested.
 
 ## Credits
 

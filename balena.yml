@@ -13,15 +13,16 @@ assets:
   repository:
     type: blob.asset
     data:
-      url: 'https://github.com/balena-labs-projects/inkyshot'
+      url: 'https://github.com/gelbal/inkyshot'
   logo:
     type: blob.asset
     data:
-      url: 'https://raw.githubusercontent.com/balena-labs-projects/inkyshot/master/logo.png'
+      url: 'https://raw.githubusercontent.com/gelbal/inkyshot/master/logo.png'
 data:
   applicationEnvironmentVariables:
     - UPDATE_HOUR: 9
     - TZ: Europe/London
+    - QOD_API_TOKEN: ""
     - QOD_CATEGORY: inspire
     - FONT: AmaticSC
     - TEST_CHARACTER: a

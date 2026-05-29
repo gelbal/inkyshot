@@ -8,18 +8,31 @@ import sys
 import textwrap
 import time
 
-from font_amatic_sc import AmaticSC
-from font_caladea import Caladea
-from font_fredoka_one import FredokaOne
-from font_hanken_grotesk import HankenGrotesk
-from font_intuitive import Intuitive
-from font_roboto import Roboto
-from font_source_sans_pro import SourceSansPro
-from font_source_serif_pro import SourceSerifPro
+try:
+    from font_amatic_sc import AmaticSC
+    from font_caladea import Caladea
+    from font_fredoka_one import FredokaOne
+    from font_hanken_grotesk import HankenGrotesk
+    from font_intuitive import Intuitive
+    from font_roboto import Roboto
+    from font_source_sans_pro import SourceSansPro
+    from font_source_serif_pro import SourceSerifPro
+except ImportError:
+    bundled_fonts = Path(__file__).parent / "fonts"
+    AmaticSC = str(bundled_fonts / "Grand9KPixel.ttf")
+    Caladea = str(bundled_fonts / "LinLibertine_DR.otf")
+    FredokaOne = str(bundled_fonts / "Grand9KPixel.ttf")
+    HankenGrotesk = str(bundled_fonts / "LinLibertine_DR.otf")
+    Intuitive = str(bundled_fonts / "LinLibertine_DR.otf")
+    Roboto = str(bundled_fonts / "LinLibertine_DR.otf")
+    SourceSansPro = str(bundled_fonts / "LinLibertine_DR.otf")
+    SourceSerifPro = str(bundled_fonts / "LinLibertine_DR.otf")
 from PIL import Image, ImageFont, ImageDraw, ImageOps
 import arrow
 import geocoder
 import requests
+
+from display_utils import celsius_to_fahrenheit, get_next_csv_quote, load_csv_quotes
 
 icon_map = {
     "clearsky": 1,
@@ -78,32 +91,74 @@ def create_mask(source):
                 mask_image.putpixel((x, y), 255)
     return mask_image
 
+def swap_two_colours(img, dark_mode=False):
+    """Swap the first two palette colours used by Inky colour displays."""
+    black = BLACK
+    target = WHITE if dark_mode else COLOUR
+    if target == black:
+        return img
+    logging.info("Swapping colours %s and %s", black, target)
+    w, h = img.size
+    for x in range(w):
+        for y in range(h):
+            if img.getpixel((x, y)) == black:
+                img.putpixel((x, y), target)
+            elif img.getpixel((x, y)) == target:
+                img.putpixel((x, y), black)
+    return img
+
 # Declare non pip fonts here ** Note: ttf files need to be in the /fonts dir of application repo
 Grand9KPixel = "/usr/app/fonts/Grand9KPixel.ttf"
 
-def draw_weather(weather, img, scale):
+def get_text_size(text, font):
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+def get_multiline_text_size(text, font, spacing=0):
+    bbox = draw.multiline_textbbox((0, 0), text, font=font, spacing=spacing)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+def get_font_offset(font, text):
+    bbox = font.getbbox(text)
+    return bbox[0], bbox[1]
+
+def apply_dry_run_palette(img):
+    if img.mode != "P":
+        return img
+
+    palette = [255, 255, 255] * 256
+    palette[BLACK * 3:BLACK * 3 + 3] = [0, 0, 0]
+    palette[WHITE * 3:WHITE * 3 + 3] = [255, 255, 255]
+    palette[COLOUR * 3:COLOUR * 3 + 3] = [220, 20, 60]
+    img.putpalette(palette)
+    return img
+
+def draw_weather(weather, img, scale, fill):
     """Draw the weather info on screen"""
     logging.info("Prepare the weather data for drawing")
+    text_x = 3 + X_OFFSET // 3
+    text_y = 3 + Y_OFFSET
     # Draw today's date on left side below today's name
     today = arrow.utcnow().format(fmt="DD MMMM", locale=LOCALE)
-    date_font = ImageFont.truetype(WEATHER_FONT, 18)
-    draw.text((3, 3), today, BLACK, font=date_font)
+    date_font = ImageFont.truetype(WEATHER_FONT, 18 + WEATHER_FONT_INCREASE)
+    draw.text((text_x, text_y), today, BLACK, font=date_font)
     # Draw current temperature to right of today
-    temp_font = ImageFont.truetype(WEATHER_FONT, 24)
-    draw.text((3, 30), f"{temp_to_str(weather['temperature'], scale)}°", BLACK, font=temp_font)
+    temp_font = ImageFont.truetype(WEATHER_FONT, 24 + WEATHER_FONT_INCREASE)
+    draw.text((text_x, 30 + Y_OFFSET), f"{temp_to_str(weather['temperature'], scale)}°", fill, font=temp_font)
     # Draw today's high and low temps on left side below date
-    small_font = ImageFont.truetype(WEATHER_FONT, 14)
+    small_font = ImageFont.truetype(WEATHER_FONT, 14 + WEATHER_FONT_INCREASE)
     draw.text(
-        (3, 72),
+        (text_x, 72 + Y_OFFSET),
         f"{temp_to_str(weather['min_temp'], scale)}° - {temp_to_str(weather['max_temp'], scale)}°",
         BLACK,
         font=small_font,
     )
     # Draw today's max humidity on left side below temperatures
-    draw.text((3, 87), f"{weather['max_humidity']}%", BLACK, font=small_font)
+    draw.text((text_x, 87 + Y_OFFSET), f"{weather['max_humidity']}%", BLACK, font=small_font)
     # Load weather icon
     icon_name = weather['symbol'].split('_')[0]
     time_of_day = ''
+    swap_colours = False
     # Couple of symbols have different icons for day and night. Check if this symbol is one of them.
     if len(weather['symbol'].split('_')) > 1:
         symbol_cycle = weather['symbol'].split('_')[1]
@@ -111,35 +166,50 @@ def draw_weather(weather, img, scale):
             time_of_day = 'd'
         elif symbol_cycle == 'night':
             time_of_day = 'n'
+            swap_colours = True
     icon_filename = f"{icon_map[icon_name]:02}{time_of_day}.png"
     filepath = Path(__file__).parent / 'weather-icons' / icon_filename
     icon_image = Image.open(filepath)
-    icon_mask = create_mask(icon_image)
+    if swap_colours:
+        logging.info("Swapping night weather icon black and colour pixels")
+        icon_image = swap_two_colours(icon_image)
     # Draw the weather icon
     if WEATHER_INVERT and WAVESHARE:
+        icon_mask = create_mask(icon_image)
         logging.info("Inverting Weather Icon")
         icon = Image.new('1', (100, 100), 255)
         icon.paste(icon_image, (0,0), icon_mask)
         icon_inverted = ImageOps.invert(icon.convert('RGB'))
-        img.paste(icon_inverted, (120, 3))
+        img.paste(icon_inverted, (119 + X_OFFSET, 3 + Y_OFFSET))
     else:
-        img.paste(icon_image, (120, 3), icon_mask)
+        img.paste(icon_image, (119 + X_OFFSET, 3 + Y_OFFSET))
     return img
 
-def get_current_display():
-    """Query device supervisor API to retrieve the current display"""
+def get_device_tag(tag_name):
+    """Query device supervisor API to retrieve a device tag value."""
+    if not BALENA_SUPERVISOR_ADDRESS or not BALENA_SUPERVISOR_API_KEY:
+        return None
+
     url = f"{BALENA_SUPERVISOR_ADDRESS}/v2/device/tags?apikey={BALENA_SUPERVISOR_API_KEY}"
     headers = {"Accept": "application/json"}
-    current_display = None
+    tag_value = None
     try:
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
             data = response.json()
             if "tags" in data:
-                current_display = next((t['value'] for t in data['tags'] if t['name'] == "current_display"), None)
+                tag_value = next((t['value'] for t in data['tags'] if t['name'] == tag_name), None)
     except requests.exceptions.RequestException as err:
         logging.error(err)
-    return current_display
+    return tag_value
+
+def get_current_display():
+    """Query device supervisor API to retrieve the current display."""
+    return get_device_tag("current_display")
+
+def get_csv_index():
+    """Query device supervisor API to retrieve the custom quote CSV index."""
+    return get_device_tag("csv_index")
 
 def get_location():
     """Return coordinate and location info based on IP address"""
@@ -194,8 +264,12 @@ def get_weather(lat: float, lon: float):
         logging.error(err)
     return weather
 
-def set_current_display(val):
-    """Update the tag value for current display"""
+def set_device_tag(tag_name, val):
+    """Update a balena device tag value."""
+    if not BALENA_API_KEY or not BALENA_DEVICE_UUID:
+        logging.debug("Skipping device tag update for %s; balena API env vars are missing", tag_name)
+        return None
+
     # First get device identifier for future call
     url_device = f"https://api.balena-cloud.com/v5/device?$filter=uuid eq '{BALENA_DEVICE_UUID}'&$select=id"
     url_device_tag = "https://api.balena-cloud.com/v5/device_tag"
@@ -205,15 +279,17 @@ def set_current_display(val):
         if response.status_code == 200:
             data = response.json()
             device_id = data['d'][0]['id'] if 'd' in data and len(data['d']) > 0 else None
+            if device_id is None:
+                logging.error("Failed to resolve balena device id for tag update")
+                return None
             request_data = {
                 "device": device_id,
-                "tag_key": "current_display",
+                "tag_key": tag_name,
                 "value": val
             }
-            request_data = {"device": device_id, "tag_key": "current_display", "value": val }
-            current_display = get_current_display()
-            if current_display:
-                if current_display == val:
+            current_value = get_device_tag(tag_name)
+            if current_value:
+                if current_value == str(val):
                     # No need to modify the tag
                     return None
                 # Let's modify the existing tag with the new val
@@ -222,12 +298,20 @@ def set_current_display(val):
                 # No tag exists yet, so let's create it
                 requests.post(url_device_tag, data=request_data, headers=headers)
     except requests.exceptions.RequestException as err:
-        logging.error(f"Failed to set current display to {val}. Error is: {err}")
+        logging.error(f"Failed to set {tag_name} to {val}. Error is: {err}")
+
+def set_current_display(val):
+    """Update the tag value for current display."""
+    return set_device_tag("current_display", val)
+
+def set_csv_index(val):
+    """Update the tag value for the custom quote CSV index."""
+    return set_device_tag("csv_index", str(val))
 
 def temp_to_str(temp, scale):
-    """Prepare the temperature to draw based on the defined scale: Celcius or Fahrenheit"""
+    """Prepare the temperature to draw based on the defined scale: Celsius or Fahrenheit."""
     if scale == 'F':
-        temp = temp * 9/5 + 32
+        temp = celsius_to_fahrenheit(temp)
     return f"{temp:.1f}"
 
 # Read the preset environment variables and overwrite the default ones
@@ -268,6 +352,14 @@ WEATHER_INVERT = True if "WEATHER_INVERT" in os.environ else False
 # Temperature scale
 SCALE = 'F' if "SCALE" in os.environ and os.environ["SCALE"] == 'F' else 'C'
 
+# Temperature threshold above which readings are displayed in colour
+TEMP_THRESHOLD = 25 if SCALE == 'C' else celsius_to_fahrenheit(25)
+if "TEMP_THRESHOLD" in os.environ:
+    try:
+        TEMP_THRESHOLD = float(os.environ['TEMP_THRESHOLD'])
+    except ValueError:
+        logging.warning("Ignoring invalid TEMP_THRESHOLD value: %s", os.environ['TEMP_THRESHOLD'])
+
 # Locale formatting of date
 LOCALE = os.environ["LOCALE"] if "LOCALE" in os.environ else 'en'
 
@@ -275,16 +367,29 @@ LOCALE = os.environ["LOCALE"] if "LOCALE" in os.environ else 'en'
 MODE = os.environ["MODE"] if "MODE" in os.environ else 'quote'
 
 # Read balena variables for balena API calls
-BALENA_API_KEY = os.environ["BALENA_API_KEY"]
-BALENA_DEVICE_UUID = os.environ["BALENA_DEVICE_UUID"]
-BALENA_SUPERVISOR_ADDRESS = os.environ["BALENA_SUPERVISOR_ADDRESS"]
-BALENA_SUPERVISOR_API_KEY = os.environ["BALENA_SUPERVISOR_API_KEY"]
+BALENA_API_KEY = os.environ.get("BALENA_API_KEY")
+BALENA_DEVICE_UUID = os.environ.get("BALENA_DEVICE_UUID")
+BALENA_SUPERVISOR_ADDRESS = os.environ.get("BALENA_SUPERVISOR_ADDRESS")
+BALENA_SUPERVISOR_API_KEY = os.environ.get("BALENA_SUPERVISOR_API_KEY")
+QOD_API_TOKEN = os.environ.get("QOD_API_TOKEN")
 
+DRY_RUN = True if "DRY_RUN" in os.environ else False
 WAVESHARE = True if "WAVESHARE" in os.environ else False
 
 # Init the display. TODO: support other colours
 logging.debug("Init and Clear")
-if WAVESHARE:
+if DRY_RUN:
+    logging.info("Display type: dry run")
+    WIDTH = int(os.environ.get("DRY_RUN_WIDTH", 212))
+    HEIGHT = int(os.environ.get("DRY_RUN_HEIGHT", 104))
+    BLACK = 0
+    WHITE = 1
+    COLOUR = 2
+    X_OFFSET = 0
+    Y_OFFSET = 0
+    WEATHER_FONT_INCREASE = 0
+    img = Image.new("P", (WIDTH, HEIGHT), WHITE)
+elif WAVESHARE:
     logging.info("Display type: Waveshare")
 
     import lib.epd2in13_V2
@@ -296,6 +401,10 @@ if WAVESHARE:
     HEIGHT = display.width # yes, width
     BLACK = 0
     WHITE = 1
+    COLOUR = BLACK
+    X_OFFSET = 0
+    Y_OFFSET = 0
+    WEATHER_FONT_INCREASE = 0
     img = Image.new('1', (WIDTH, HEIGHT), 255)
 else:
     import inky
@@ -306,6 +415,15 @@ else:
     HEIGHT = display.HEIGHT
     BLACK = display.BLACK
     WHITE = display.WHITE
+    COLOUR = BLACK if getattr(display, "colour", "black") == "black" else display.RED
+    if HEIGHT == 104:
+        X_OFFSET = 0
+        Y_OFFSET = 0
+        WEATHER_FONT_INCREASE = 0
+    else:
+        X_OFFSET = 21
+        Y_OFFSET = 8
+        WEATHER_FONT_INCREASE = 2
     img = Image.new("P", (WIDTH, HEIGHT))
 
 draw = ImageDraw.Draw(img)
@@ -329,7 +447,7 @@ if target_display == 'weather':
             geo = geocoder.arcgis(weather_location)
             [LAT, LONG] = geo.latlng
         except Exception as e:
-            print(f"Unexpected error: {e.message}")
+            logging.error("Unexpected geocoding error: %s", e)
 
     # If no address or latitute / longitude are found, retrieve location via IP address lookup
     if not LAT or not LONG:
@@ -340,7 +458,9 @@ if target_display == 'weather':
     os.environ['LATLONG'] = f"{LAT},{LONG}"
     # If weather is empty dictionary, fall back to drawing quote
     if len(weather) > 0:
-        img = draw_weather(weather, img, SCALE)
+        temperature = weather['temperature'] if SCALE == 'C' else celsius_to_fahrenheit(weather['temperature'])
+        fill = COLOUR if temperature >= TEMP_THRESHOLD else BLACK
+        img = draw_weather(weather, img, SCALE, fill)
     else:
         target_display = 'quote'
 elif target_display == 'quote':
@@ -348,19 +468,33 @@ elif target_display == 'quote':
     message = os.environ['INKY_MESSAGE'] if 'INKY_MESSAGE' in os.environ else None
     # If message was set but blank, use the device name
     if message == "":
-        message = os.environ['DEVICE_NAME']
+        message = os.environ.get('DEVICE_NAME', 'inkyshot')
     elif message is None:
+        csv_quotes = load_csv_quotes(
+            csv_message=os.environ.get('CSV_MESSAGE'),
+            csv_local_name=os.environ.get('CSV_LOCAL_NAME'),
+            csv_delimiter=os.environ.get('CSV_DELIMITER', ';'),
+        )
+        if csv_quotes:
+            message, next_csv_index = get_next_csv_quote(csv_quotes, get_csv_index(), choose_random=True)
+            set_csv_index(next_csv_index)
+    if message is None:
         try:
+            headers = {"Accept": "application/json"}
+            if QOD_API_TOKEN:
+                headers["X-TheySaidSo-Api-Secret"] = QOD_API_TOKEN
             response = requests.get(
                 f"https://quotes.rest/qod?category={CATEGORY}&language={LANGUAGE}",
-                headers={"Accept" : "application/json"}
+                headers=headers,
+                timeout=20,
             )
+            response.raise_for_status()
             data = response.json()
             message = data['contents']['quotes'][0]['quote']
-        except requests.exceptions.RequestException as err:
+        except (requests.exceptions.RequestException, KeyError, IndexError, ValueError) as err:
             logging.error(err)
             FONT_SIZE = 25
-            message = "Sorry folks, today's quote has gone walkies :("
+            message = "Sorry folks, today's quote could not be loaded."
 
     logging.info("Message: %s", message)
     # Work out what size font is required to fit this message on the display
@@ -373,17 +507,19 @@ elif target_display == 'quote':
     while message_does_not_fit == True:
         test_message = ""
         message_width = 0
-        FONT_SIZE -= 1
+        message_height = 1
+        word_list = [message]
+        FONT = ImageFont.truetype(FONT_SELECTED, FONT_SIZE)
 
-        if FONT_SIZE <= 17:
-            FONT_SIZE = 8
-            FONT = ImageFont.truetype("/usr/app/fonts/Grand9KPixel.ttf", FONT_SIZE)
+        if FONT_SIZE <= 12:
+            FONT_SIZE = 10
+            FONT = ImageFont.truetype(Grand9KPixel, FONT_SIZE)
 
         # We're using the test character here to work out how many characters
         # can fit on the display when using the chosen font
         while message_width < WIDTH:
             test_message += test_character
-            message_width, message_height = draw.textsize(test_message, font=FONT)
+            message_width, message_height = get_text_size(test_message, font=FONT)
 
         max_width = len(test_message)
         max_lines = math.floor(HEIGHT/message_height)
@@ -395,17 +531,20 @@ elif target_display == 'quote':
         if len(word_list) <= max_lines:
             message_does_not_fit = False
 
-        if FONT_SIZE < 9:
+        if FONT_SIZE <= 10:
             message_does_not_fit = False
 
+        if message_does_not_fit:
+            FONT_SIZE -= 1
+
     logging.info("Font size: %s", FONT_SIZE)
-    offset_x, offset_y = FONT.getoffset(message)
+    offset_x, offset_y = get_font_offset(FONT, message)
 
     # Rejoin the wrapped lines with newline chars
     separator = '\n'
     output_text = separator.join(word_list)
 
-    w, h = draw.multiline_textsize(output_text, font=FONT, spacing=0)
+    w, h = get_multiline_text_size(output_text, font=FONT, spacing=0)
 
     x = (WIDTH - w)/2
     y = (HEIGHT - h - offset_y)/2
@@ -415,7 +554,17 @@ elif target_display == 'quote':
 if "ROTATE" in os.environ:
     img = img.rotate(180)
 
-if WAVESHARE:
+# Enable dark mode for weather screens on colour-capable displays.
+if "WEATHER_DARK_MODE" in os.environ and target_display == 'weather':
+    logging.info("Switching to weather dark mode")
+    img = swap_two_colours(img, dark_mode=True)
+
+if DRY_RUN:
+    dry_run_output = os.environ.get("DRY_RUN_OUTPUT", "/tmp/inkyshot-preview.png")
+    img = apply_dry_run_palette(img)
+    img.save(dry_run_output)
+    logging.info("Saved dry-run image: %s", dry_run_output)
+elif WAVESHARE:
     # epd does not have a set_image method.
     display.display(display.getbuffer(img))
 else:
