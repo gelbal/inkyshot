@@ -2,6 +2,7 @@
 .github
 .env.local
 .serena
+.balena-images
 assets
 README.md
 repo.yml
