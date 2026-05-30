@@ -3,6 +3,11 @@ FROM balenalib/raspberry-pi-debian-python:3.7-buster-run
 WORKDIR /usr/app
 COPY pip.conf /etc/
 
+RUN sed -i \
+  -e 's#http://archive.raspbian.org/raspbian#http://legacy.raspbian.org/raspbian#g' \
+  -e 's#http://raspbian.raspberrypi.org/raspbian#http://legacy.raspbian.org/raspbian#g' \
+  /etc/apt/sources.list /etc/apt/sources.list.d/*.list || true
+
 RUN install_packages \
   cron \
   libatlas3-base \
