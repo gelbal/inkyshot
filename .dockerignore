@@ -1,5 +1,7 @@
 .git
 .github
+.env.local
+.serena
 assets
 README.md
 repo.yml
