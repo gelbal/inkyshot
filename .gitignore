@@ -3,5 +3,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 .serena/
+.claude/
 .env.local
 .balena-images/
